@@ -2,6 +2,7 @@
 /build/
 /out/
 /dist/
+/package/
 
 # Visual Studio
 .vs/
