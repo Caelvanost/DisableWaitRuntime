@@ -27,7 +27,7 @@ target_compile_definitions(${PROJECT_NAME}
 )
 
 if(MSVC)
-    target_compile_options(${PROJECT_NAME} PRIVATE /permissive- /W4)
+    target_compile_options(${PROJECT_NAME} PRIVATE /permissive- /W4 /utf-8)
 endif()
 
 set_target_properties(${PROJECT_NAME} PROPERTIES

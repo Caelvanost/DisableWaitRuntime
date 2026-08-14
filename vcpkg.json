@@ -2,6 +2,6 @@
   "name": "disable-wait-runtime",
   "version-string": "0.2.0",
   "dependencies": [
-    "commonlibsse-ng"
+    "commonlibsse-ng-flatrim"
   ]
 }

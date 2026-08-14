@@ -32,9 +32,8 @@ if exist "build\Release\DisableWaitRuntime.dll" (
 )
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "if (Test-Path 'Disable-Wait-Runtime-v0.2.0.zip') { Remove-Item 'Disable-Wait-Runtime-v0.2.0.zip' }; Compress-Archive -Path 'dist\*' -DestinationPath 'Disable-Wait-Runtime-v0.2.0.zip'"
+  "if (Test-Path 'dist\Disable-Wait-Runtime-v0.2.0.zip') { Remove-Item 'dist\Disable-Wait-Runtime-v0.2.0.zip' }; Compress-Archive -Path 'dist\SKSE' -DestinationPath 'dist\Disable-Wait-Runtime-v0.2.0.zip'"
 
 echo.
 echo Build complete:
-echo   Disable-Wait-Runtime-v0.2.0.zip
-endlocal
+echo   dist\Disable-Wait-Runtime-v0.2.0.zip

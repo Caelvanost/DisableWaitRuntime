@@ -82,8 +82,10 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse)
     if (path) {
         *path /= "DisableWaitRuntime.log";
         auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path->string(), true);
-        auto log = std::make_shared<spdlog::logger>("global log"s, std::move(sink));
-        log->set_level(spdlog::level::info);
+        auto log = std::make_shared<spdlog::logger>(
+            "global log",
+            std::move(sink)
+        );        log->set_level(spdlog::level::info);
         log->flush_on(spdlog::level::info);
         spdlog::set_default_logger(std::move(log));
     }
