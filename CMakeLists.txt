@@ -11,13 +11,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(CommonLibSSE CONFIG REQUIRED)
 
-add_library(${PROJECT_NAME} SHARED
-    src/plugin.cpp
-)
-
-target_link_libraries(${PROJECT_NAME}
-    PRIVATE
-        CommonLibSSE::CommonLibSSE
+add_commonlibsse_plugin(${PROJECT_NAME}
+    SOURCES
+        src/plugin.cpp
 )
 
 target_compile_definitions(${PROJECT_NAME}
