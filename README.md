@@ -8,6 +8,7 @@ The plugin does **not** replace `controlmap.txt`, does not require an ESP, and d
 
 - Disables the native `Wait` input action.
 - Frees the default `T` key so it can be used by another mod or MCM hotkey.
+- Reapplies the Wait unbind after in-game control remapping.
 - Does not replace or patch `controlmap.txt`.
 - Does not affect sleeping in beds.
 - No ESP or ESL.
@@ -19,13 +20,16 @@ The plugin does **not** replace `controlmap.txt`, does not require an ESP, and d
 
 Skyrim loads its input bindings into `RE::ControlMap`.
 
-After the game's control data has loaded, Disable Wait Runtime searches the gameplay mappings for the event named `Wait` and sets only that event's `inputKey` to Skyrim's unmapped value, `0xFF`.
+After the game's control data has loaded, Disable Wait Runtime searches the gameplay mappings for the event named `Wait` and sets that event to Skyrim's invalid/unmapped input value.
 
 The operation is reapplied after:
 
 - `DataLoaded`
 - `NewGame`
 - `PostLoadGame`
+- menu closure, queued through the SKSE task interface so in-game control remapping has finished before `Wait` is unbound again
+
+This means assigning the Wait action to another key in Skyrim's Controls menu does not permanently restore the Wait function. Once the menu closes, Disable Wait Runtime removes the new Wait binding again.
 
 This avoids distributing a replacement `controlmap.txt` and reduces compatibility problems with UI, controller, hotkey, and control-remapping mods.
 
@@ -59,7 +63,9 @@ After loading a save:
 2. The Wait menu should no longer open.
 3. Assign `T` to another mod or MCM hotkey.
 4. Confirm that the new hotkey works.
-5. Activate a bed and confirm that sleeping still works.
+5. Open Skyrim's Controls menu and assign the Wait action to `T`.
+6. Close the menu and confirm that pressing `T` still does not open Wait.
+7. Activate a bed and confirm that sleeping still works.
 
 The plugin log is written to:
 
@@ -93,7 +99,7 @@ package/
         └── DisableWaitRuntime.dll
 
 dist/
-└── Disable-Wait-Runtime-v0.2.1.zip
+└── Disable-Wait-Runtime-v0.2.2.zip
 ```
 
 The ZIP itself contains only the deployable `SKSE/` tree.
@@ -102,7 +108,7 @@ The ZIP itself contains only the deployable `SKSE/` tree.
 
 `VERSION` is the source of truth for the project version.
 
-Current source version: **v0.2.1**
+Current source version: **v0.2.2**
 
 Versioning policy:
 
@@ -142,7 +148,7 @@ The plugin is intended for Skyrim SE/AE runtimes supported by CommonLibSSE-NG.
 
 Because it modifies the in-memory control map instead of distributing a complete `controlmap.txt`, it is less invasive than traditional control-map replacement mods.
 
-Mods that intentionally modify the `Wait` mapping at runtime may conflict depending on when each mod applies its changes.
+Mods that intentionally modify the `Wait` mapping at runtime may conflict temporarily, but Disable Wait Runtime reapplies its unbind after menu closures and game load events.
 
 ## Uninstallation
 
