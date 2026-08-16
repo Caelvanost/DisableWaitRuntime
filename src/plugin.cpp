@@ -85,12 +85,13 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse)
         auto log = std::make_shared<spdlog::logger>(
             "global log",
             std::move(sink)
-        );        log->set_level(spdlog::level::info);
+        );
+        log->set_level(spdlog::level::info);
         log->flush_on(spdlog::level::info);
         spdlog::set_default_logger(std::move(log));
     }
 
-    logger::info("Disable Wait Runtime v0.2.0 loading");
+    logger::info("Disable Wait Runtime v{} loading", DISABLE_WAIT_RUNTIME_VERSION);
 
     auto* messaging = SKSE::GetMessagingInterface();
     if (!messaging || !messaging->RegisterListener(DisableWait::MessageHandler)) {
