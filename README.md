@@ -41,7 +41,7 @@ The project is built with **CommonLibSSE-NG**.
 
 Install the compiled release archive with Vortex.
 
-The release package should contain:
+The release package contains:
 
 ```text
 SKSE/
@@ -82,11 +82,34 @@ Set the `VCPKG_ROOT` environment variable to your vcpkg installation, then run:
 build_release.bat
 ```
 
-The build script configures CMake, compiles the plugin, copies the DLL into the distribution folder, and creates:
+The build script reads the project version from `VERSION`, configures CMake, compiles the plugin, stages the Vortex package under `package/`, and creates the versioned release archive under `dist/`.
+
+For the current version, the output is:
 
 ```text
-Disable-Wait-Runtime-v0.2.0.zip
+package/
+└── SKSE/
+    └── Plugins/
+        └── DisableWaitRuntime.dll
+
+dist/
+└── Disable-Wait-Runtime-v0.2.1.zip
 ```
+
+The ZIP itself contains only the deployable `SKSE/` tree.
+
+## Versioning
+
+`VERSION` is the source of truth for the project version.
+
+Current source version: **v0.2.1**
+
+Versioning policy:
+
+- Small fixes and minor maintenance changes increment the third number: `0.2.1` → `0.2.2`.
+- Larger feature or behavior changes increment the second number and reset the third to zero: `0.2.2` → `0.3.0`.
+- `CMakeLists.txt`, the plugin log version, and the deployment ZIP name derive their version from `VERSION`.
+- `README.md` and package metadata must be updated whenever `VERSION` changes.
 
 ## Project structure
 
@@ -95,11 +118,22 @@ DisableWaitRuntime/
 ├── .gitignore
 ├── LICENSE
 ├── README.md
+├── VERSION
 ├── CMakeLists.txt
 ├── vcpkg.json
+├── vcpkg-configuration.json
 ├── build_release.bat
 └── src/
+    ├── PCH.h
     └── plugin.cpp
+```
+
+Generated build artifacts are kept out of source control:
+
+```text
+build/
+package/
+dist/
 ```
 
 ## Compatibility
@@ -115,10 +149,6 @@ Mods that intentionally modify the `Wait` mapping at runtime may conflict depend
 Disable or remove the mod and restart Skyrim.
 
 The plugin modifies only the in-memory control map, so Skyrim reloads its normal bindings on the next launch. No save cleaning is required.
-
-## Version
-
-Current source version: **v0.2.0**
 
 ## License
 
