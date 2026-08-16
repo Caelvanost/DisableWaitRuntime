@@ -34,21 +34,68 @@ namespace DisableWait
 
             for (auto& mapping : mappings) {
                 if (mapping.eventID.c_str() && kWaitEvent == mapping.eventID.c_str()) {
-                    if (mapping.inputKey != RE::ControlMap::kInvalid) {
+                    const auto invalidKey = static_cast<std::uint16_t>(RE::ControlMap::kInvalid);
+                    if (mapping.inputKey != invalidKey || mapping.modifier != 0) {
                         logger::info(
                             "Unbinding Wait on device {} (old key = 0x{:X})",
                             device,
                             mapping.inputKey);
-                    }
 
-                    mapping.inputKey = static_cast<std::uint16_t>(RE::ControlMap::kInvalid);
-                    mapping.modifier = 0;
-                    ++changed;
+                        mapping.inputKey = invalidKey;
+                        mapping.modifier = 0;
+                        ++changed;
+                    }
                 }
             }
         }
 
-        logger::info("Wait unbound from {} gameplay mapping(s)", changed);
+        if (changed > 0) {
+            logger::info("Wait unbound from {} gameplay mapping(s)", changed);
+        }
+    }
+
+    class MenuWatcher final : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
+    {
+    public:
+        static MenuWatcher* GetSingleton()
+        {
+            static MenuWatcher singleton;
+            return std::addressof(singleton);
+        }
+
+        RE::BSEventNotifyControl ProcessEvent(
+            const RE::MenuOpenCloseEvent* event,
+            RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
+        {
+            if (!event || event->opening) {
+                return RE::BSEventNotifyControl::kContinue;
+            }
+
+            // The controls menu can rebuild ControlMap mappings. Queue the
+            // unbind for the next SKSE task so Skyrim has finished applying
+            // any remapping before we remove Wait again.
+            if (auto* tasks = SKSE::GetTaskInterface()) {
+                tasks->AddTask([]() {
+                    UnbindWait();
+                });
+            } else {
+                UnbindWait();
+            }
+
+            return RE::BSEventNotifyControl::kContinue;
+        }
+    };
+
+    void RegisterMenuWatcher()
+    {
+        auto* ui = RE::UI::GetSingleton();
+        if (!ui) {
+            logger::error("UI singleton is unavailable; runtime remap protection disabled");
+            return;
+        }
+
+        ui->AddEventSink<RE::MenuOpenCloseEvent>(MenuWatcher::GetSingleton());
+        logger::info("Menu remap watcher registered");
     }
 
     void MessageHandler(SKSE::MessagingInterface::Message* message)
@@ -59,12 +106,12 @@ namespace DisableWait
 
         switch (message->type) {
         case SKSE::MessagingInterface::kDataLoaded:
+            RegisterMenuWatcher();
             UnbindWait();
             break;
 
         case SKSE::MessagingInterface::kPostLoadGame:
         case SKSE::MessagingInterface::kNewGame:
-            // Re-apply in case another mod or a controls reload changed the map.
             UnbindWait();
             break;
 
