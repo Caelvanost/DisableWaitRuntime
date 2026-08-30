@@ -81,7 +81,8 @@ namespace DisableWait
             RE::UI_MESSAGE_TYPE type,
             RE::IUIMessageData* data)
         {
-            const bool isSleepWait = menuName == RE::SleepWaitMenu::MENU_NAME;
+            const bool isSleepWait =
+                menuName.c_str() && RE::SleepWaitMenu::MENU_NAME == menuName.c_str();
             const bool isOpening =
                 type == RE::UI_MESSAGE_TYPE::kShow ||
                 type == RE::UI_MESSAGE_TYPE::kReshow;
