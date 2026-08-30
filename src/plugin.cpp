@@ -1,6 +1,7 @@
 #include "RE/Skyrim.h"
 #include "SKSE/SKSE.h"
 
+#include <chrono>
 #include <spdlog/sinks/basic_file_sink.h>
 
 namespace logger = SKSE::log;
@@ -8,94 +9,111 @@ namespace logger = SKSE::log;
 namespace DisableWait
 {
     constexpr std::string_view kWaitEvent = "Wait";
+    constexpr auto kSuppressionWindow = std::chrono::milliseconds(500);
 
-    void UnbindWait()
+    std::chrono::steady_clock::time_point g_blockSleepWaitUntil{};
+
+    bool ShouldBlockSleepWaitMenu()
     {
-        auto* controlMap = RE::ControlMap::GetSingleton();
-        if (!controlMap) {
-            logger::error("ControlMap singleton is unavailable");
-            return;
+        const auto now = std::chrono::steady_clock::now();
+        if (now <= g_blockSleepWaitUntil) {
+            g_blockSleepWaitUntil = {};
+            return true;
         }
 
-        const auto gameplayIndex =
-            static_cast<std::size_t>(RE::UserEvents::INPUT_CONTEXT_ID::kGameplay);
-
-        auto* gameplay = controlMap->controlMap[gameplayIndex];
-        if (!gameplay) {
-            logger::error("Gameplay input context is unavailable");
-            return;
-        }
-
-        std::size_t changed = 0;
-
-        const auto deviceCount = RE::ControlMap::InputContext::GetNumDeviceMappings();
-        for (std::size_t device = 0; device < deviceCount; ++device) {
-            auto& mappings = gameplay->deviceMappings[device];
-
-            for (auto& mapping : mappings) {
-                if (mapping.eventID.c_str() && kWaitEvent == mapping.eventID.c_str()) {
-                    const auto invalidKey = static_cast<std::uint16_t>(RE::ControlMap::kInvalid);
-                    if (mapping.inputKey != invalidKey || mapping.modifier != 0) {
-                        logger::info(
-                            "Unbinding Wait on device {} (old key = 0x{:X})",
-                            device,
-                            mapping.inputKey);
-
-                        mapping.inputKey = invalidKey;
-                        mapping.modifier = 0;
-                        ++changed;
-                    }
-                }
-            }
-        }
-
-        if (changed > 0) {
-            logger::info("Wait unbound from {} gameplay mapping(s)", changed);
-        }
+        g_blockSleepWaitUntil = {};
+        return false;
     }
 
-    class MenuWatcher final : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
+    class InputWatcher final : public RE::BSTEventSink<RE::InputEvent*>
     {
     public:
-        static MenuWatcher* GetSingleton()
+        static InputWatcher* GetSingleton()
         {
-            static MenuWatcher singleton;
+            static InputWatcher singleton;
             return std::addressof(singleton);
         }
 
         RE::BSEventNotifyControl ProcessEvent(
-            const RE::MenuOpenCloseEvent* event,
-            RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
+            RE::InputEvent* const* eventPtr,
+            RE::BSTEventSource<RE::InputEvent*>*) override
         {
-            if (!event || event->opening) {
+            if (!eventPtr) {
                 return RE::BSEventNotifyControl::kContinue;
             }
 
-            // The controls menu can rebuild ControlMap mappings. Queue the
-            // unbind for the next SKSE task so Skyrim has finished applying
-            // any remapping before we remove Wait again.
-            if (auto* tasks = SKSE::GetTaskInterface()) {
-                tasks->AddTask([]() {
-                    UnbindWait();
-                });
-            } else {
-                UnbindWait();
+            auto* ui = RE::UI::GetSingleton();
+            if (ui && ui->GameIsPaused()) {
+                return RE::BSEventNotifyControl::kContinue;
+            }
+
+            for (auto* event = *eventPtr; event; event = event->next) {
+                if (event->eventType != RE::INPUT_EVENT_TYPE::kButton) {
+                    continue;
+                }
+
+                auto* button = event->AsButtonEvent();
+                if (!button || !button->IsDown() || button->HeldDuration() != 0.0f) {
+                    continue;
+                }
+
+                const auto userEvent = button->QUserEvent();
+                if (userEvent.c_str() && kWaitEvent == userEvent.c_str()) {
+                    // Preserve Skyrim's Wait mapping so UI mods such as RaceMenu
+                    // can still query and reuse the bound key. We only mark the
+                    // next Sleep/Wait menu opening caused by this gameplay input
+                    // for suppression.
+                    g_blockSleepWaitUntil = std::chrono::steady_clock::now() + kSuppressionWindow;
+                    logger::debug("Native Wait input detected; arming Sleep/Wait menu suppression");
+                    break;
+                }
             }
 
             return RE::BSEventNotifyControl::kContinue;
         }
     };
 
-    void RegisterMenuWatcher()
+    struct UIMessageQueueHook
     {
-        auto* ui = RE::UI::GetSingleton();
-        if (!ui) {
-            logger::error("UI singleton is unavailable; runtime remap protection disabled");
+        static void thunk(
+            RE::UIMessageQueue* queue,
+            const RE::BSFixedString& menuName,
+            RE::UI_MESSAGE_TYPE type,
+            RE::IUIMessageData* data)
+        {
+            const bool isSleepWait = menuName == RE::SleepWaitMenu::MENU_NAME;
+            const bool isOpening =
+                type == RE::UI_MESSAGE_TYPE::kShow ||
+                type == RE::UI_MESSAGE_TYPE::kReshow;
+
+            if (isSleepWait && isOpening && ShouldBlockSleepWaitMenu()) {
+                logger::info("Blocked native Wait menu opening while preserving the Wait key mapping");
+                return;
+            }
+
+            func(queue, menuName, type, data);
+        }
+
+        static void Install()
+        {
+            REL::Relocation<std::uintptr_t> target{ RE::Offset::UIMessageQueue::AddMessage };
+            func = target.write_branch<5>(thunk);
+            logger::info("UIMessageQueue hook installed");
+        }
+
+        inline static REL::Relocation<decltype(thunk)> func;
+    };
+
+    void RegisterInputWatcher()
+    {
+        auto* input = RE::BSInputDeviceManager::GetSingleton();
+        if (!input) {
+            logger::error("BSInputDeviceManager singleton is unavailable");
             return;
         }
 
-        ui->AddEventSink<RE::MenuOpenCloseEvent>(MenuWatcher::GetSingleton());
-        logger::info("Menu remap watcher registered");
+        input->AddEventSink(InputWatcher::GetSingleton());
+        logger::info("Wait input watcher registered");
     }
 
     void MessageHandler(SKSE::MessagingInterface::Message* message)
@@ -104,19 +122,8 @@ namespace DisableWait
             return;
         }
 
-        switch (message->type) {
-        case SKSE::MessagingInterface::kDataLoaded:
-            RegisterMenuWatcher();
-            UnbindWait();
-            break;
-
-        case SKSE::MessagingInterface::kPostLoadGame:
-        case SKSE::MessagingInterface::kNewGame:
-            UnbindWait();
-            break;
-
-        default:
-            break;
+        if (message->type == SKSE::MessagingInterface::kInputLoaded) {
+            RegisterInputWatcher();
         }
     }
 }
@@ -139,6 +146,9 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse)
     }
 
     logger::info("Disable Wait Runtime v{} loading", DISABLE_WAIT_RUNTIME_VERSION);
+
+    SKSE::AllocTrampoline(64);
+    DisableWait::UIMessageQueueHook::Install();
 
     auto* messaging = SKSE::GetMessagingInterface();
     if (!messaging || !messaging->RegisterListener(DisableWait::MessageHandler)) {
