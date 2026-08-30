@@ -1,37 +1,40 @@
 # Disable Wait Runtime
 
-A lightweight SKSE plugin for **Skyrim Special Edition / Anniversary Edition** that disables Skyrim's native **Wait** action at runtime and frees its key binding for use by other mods.
+A lightweight SKSE plugin for **Skyrim Special Edition / Anniversary Edition** that prevents Skyrim's native **Wait** menu from opening during normal gameplay while preserving the vanilla `Wait` key mapping for UI mods that reuse it.
 
 The plugin does **not** replace `controlmap.txt`, does not require an ESP, and does not store persistent data in your save.
 
 ## Features
 
-- Disables the native `Wait` input action.
-- Frees the default `T` key so it can be used by another mod or MCM hotkey.
-- Reapplies the Wait unbind after in-game control remapping.
+- Prevents the native **Wait** menu from opening from the gameplay Wait input.
+- Preserves Skyrim's `Wait` control mapping instead of setting it to unmapped.
+- Keeps the default `T` mapping available to UI mods such as RaceMenu that query the vanilla Wait binding.
+- Allows other SKSE mods and hotkey systems to react to the same physical key.
 - Does not replace or patch `controlmap.txt`.
 - Does not affect sleeping in beds.
 - No ESP or ESL.
 - No Papyrus scripts.
 - No persistent save-game data.
-- Normal Skyrim bindings return after uninstalling the plugin and restarting the game.
+- Safe to uninstall.
 
 ## How it works
 
-Skyrim loads its input bindings into `RE::ControlMap`.
+Version 0.3.0 changes the implementation from earlier releases.
 
-After the game's control data has loaded, Disable Wait Runtime searches the gameplay mappings for the event named `Wait` and sets that event to Skyrim's invalid/unmapped input value.
+Older versions removed the `Wait` mapping from `RE::ControlMap`. That successfully stopped the Wait menu, but it also removed the mapping used contextually by some UI mods. RaceMenu, for example, uses Skyrim's vanilla `Wait` binding for its **Choose Texture** action.
 
-The operation is reapplied after:
+Version 0.3.0 leaves `RE::ControlMap` untouched.
 
-- `DataLoaded`
-- `NewGame`
-- `PostLoadGame`
-- menu closure, queued through the SKSE task interface so in-game control remapping has finished before `Wait` is unbound again
+Instead, Disable Wait Runtime:
 
-This means assigning the Wait action to another key in Skyrim's Controls menu does not permanently restore the Wait function. Once the menu closes, Disable Wait Runtime removes the new Wait binding again.
+1. Watches gameplay input events for the vanilla `Wait` user event.
+2. When a gameplay Wait press is detected, briefly marks the next `Sleep/Wait Menu` opening for suppression.
+3. Hooks `RE::UIMessageQueue::AddMessage` and discards only that matching menu-open request.
+4. Leaves other `Sleep/Wait Menu` openings alone, including openings caused by activating beds.
 
-This avoids distributing a replacement `controlmap.txt` and reduces compatibility problems with UI, controller, hotkey, and control-remapping mods.
+The suppression window is intentionally short so an unrelated later Sleep/Wait menu opening is not blocked.
+
+Because the Wait mapping itself remains intact, UI mods can continue to query and reuse that binding.
 
 ## Requirements
 
@@ -43,7 +46,7 @@ The project is built with **CommonLibSSE-NG**.
 
 ## Installation
 
-Install the compiled release archive with Vortex.
+Install the compiled release archive with Vortex or another mod manager.
 
 The release package contains:
 
@@ -59,13 +62,12 @@ Enable the mod and launch Skyrim through SKSE or your normal Skyrim Together set
 
 After loading a save:
 
-1. Press `T` during normal gameplay.
-2. The Wait menu should no longer open.
-3. Assign `T` to another mod or MCM hotkey.
-4. Confirm that the new hotkey works.
-5. Open Skyrim's Controls menu and assign the Wait action to `T`.
-6. Close the menu and confirm that pressing `T` still does not open Wait.
-7. Activate a bed and confirm that sleeping still works.
+1. Make sure Skyrim's **Wait** action is assigned to `T` in the Controls menu.
+2. Press `T` during normal gameplay.
+3. Confirm that the native Wait menu does not open.
+4. Confirm that another mod using `T` can still react to the key.
+5. Open RaceMenu and verify that **Choose Texture** still uses the vanilla Wait-bound key.
+6. Activate a bed and confirm that the Sleep/Wait menu still opens normally for sleeping.
 
 The plugin log is written to:
 
@@ -99,7 +101,7 @@ package/
         └── DisableWaitRuntime.dll
 
 dist/
-└── Disable-Wait-Runtime-v0.2.2.zip
+└── Disable-Wait-Runtime-v0.3.0.zip
 ```
 
 The ZIP itself contains only the deployable `SKSE/` tree.
@@ -108,12 +110,12 @@ The ZIP itself contains only the deployable `SKSE/` tree.
 
 `VERSION` is the source of truth for the project version.
 
-Current source version: **v0.2.2**
+Current source version: **v0.3.0**
 
 Versioning policy:
 
-- Small fixes and minor maintenance changes increment the third number: `0.2.1` → `0.2.2`.
-- Larger feature or behavior changes increment the second number and reset the third to zero: `0.2.2` → `0.3.0`.
+- Small fixes and minor maintenance changes increment the third number: `0.3.0` → `0.3.1`.
+- Larger feature or behavior changes increment the second number and reset the third to zero: `0.3.1` → `0.4.0`.
 - `CMakeLists.txt`, the plugin log version, and the deployment ZIP name derive their version from `VERSION`.
 - `README.md` and package metadata must be updated whenever `VERSION` changes.
 
@@ -146,15 +148,17 @@ dist/
 
 The plugin is intended for Skyrim SE/AE runtimes supported by CommonLibSSE-NG.
 
-Because it modifies the in-memory control map instead of distributing a complete `controlmap.txt`, it is less invasive than traditional control-map replacement mods.
+Because it preserves Skyrim's control mapping and suppresses only the native gameplay Wait-menu request, it is less invasive than replacing `controlmap.txt` or removing the Wait binding entirely.
 
-Mods that intentionally modify the `Wait` mapping at runtime may conflict temporarily, but Disable Wait Runtime reapplies its unbind after menu closures and game load events.
+### RaceMenu
+
+Version 0.3.0 is specifically designed to preserve RaceMenu's **Choose Texture** shortcut. RaceMenu can continue to query the vanilla `Wait` mapping while the native gameplay Wait menu is suppressed.
 
 ## Uninstallation
 
 Disable or remove the mod and restart Skyrim.
 
-The plugin modifies only the in-memory control map, so Skyrim reloads its normal bindings on the next launch. No save cleaning is required.
+The plugin does not persistently modify Skyrim's controls or save data. No save cleaning is required.
 
 ## License
 
