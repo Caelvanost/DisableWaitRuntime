@@ -1,7 +1,8 @@
 #include "RE/Skyrim.h"
 #include "SKSE/SKSE.h"
 
-#include <chrono>
+#include <algorithm>
+#include <iterator>
 #include <spdlog/sinks/basic_file_sink.h>
 
 namespace logger = SKSE::log;
@@ -9,28 +10,14 @@ namespace logger = SKSE::log;
 namespace DisableWait
 {
     constexpr std::string_view kWaitEvent = "Wait";
-    constexpr auto kSuppressionWindow = std::chrono::milliseconds(500);
+    constexpr std::string_view kConsumedWaitEvent = "DisableWaitRuntime_Consumed";
 
-    std::chrono::steady_clock::time_point g_blockSleepWaitUntil{};
-
-    bool ShouldBlockSleepWaitMenu()
-    {
-        const auto now = std::chrono::steady_clock::now();
-        if (now <= g_blockSleepWaitUntil) {
-            g_blockSleepWaitUntil = {};
-            return true;
-        }
-
-        g_blockSleepWaitUntil = {};
-        return false;
-    }
-
-    class InputWatcher final : public RE::BSTEventSink<RE::InputEvent*>
+    class InputFilter final : public RE::BSTEventSink<RE::InputEvent*>
     {
     public:
-        static InputWatcher* GetSingleton()
+        static InputFilter* GetSingleton()
         {
-            static InputWatcher singleton;
+            static InputFilter singleton;
             return std::addressof(singleton);
         }
 
@@ -42,8 +29,10 @@ namespace DisableWait
                 return RE::BSEventNotifyControl::kContinue;
             }
 
-            auto* ui = RE::UI::GetSingleton();
-            if (ui && ui->GameIsPaused()) {
+            // Do not alter menu input. RaceMenu reuses Skyrim's vanilla Wait
+            // mapping for actions such as Choose Texture, so the Wait user event
+            // must remain available while a pausing UI menu is active.
+            if (auto* ui = RE::UI::GetSingleton(); ui && ui->GameIsPaused()) {
                 return RE::BSEventNotifyControl::kContinue;
             }
 
@@ -53,18 +42,17 @@ namespace DisableWait
                 }
 
                 auto* button = event->AsButtonEvent();
-                if (!button || !button->IsDown() || button->HeldDuration() != 0.0f) {
+                if (!button) {
                     continue;
                 }
 
-                const auto userEvent = button->QUserEvent();
-                if (userEvent.c_str() && kWaitEvent == userEvent.c_str()) {
-                    // Keep the vanilla Wait mapping intact so UI mods such as
-                    // RaceMenu can still query and reuse it. We only arm a short
-                    // suppression window for the Sleep/Wait menu opened by this
-                    // gameplay input.
-                    g_blockSleepWaitUntil = std::chrono::steady_clock::now() + kSuppressionWindow;
-                    break;
+                const auto& userEvent = button->QUserEvent();
+                if (userEvent == kWaitEvent) {
+                    // Neutralize only this transient gameplay input event. The
+                    // ControlMap entry itself is left untouched, so UI mods can
+                    // still query the Wait binding and the physical key remains
+                    // available to hotkey mods that inspect the key code directly.
+                    button->userEvent = kConsumedWaitEvent.data();
                 }
             }
 
@@ -72,49 +60,7 @@ namespace DisableWait
         }
     };
 
-    class MenuWatcher final : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
-    {
-    public:
-        static MenuWatcher* GetSingleton()
-        {
-            static MenuWatcher singleton;
-            return std::addressof(singleton);
-        }
-
-        RE::BSEventNotifyControl ProcessEvent(
-            const RE::MenuOpenCloseEvent* event,
-            RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
-        {
-            if (!event || !event->opening) {
-                return RE::BSEventNotifyControl::kContinue;
-            }
-
-            const bool isSleepWait =
-                event->menuName.c_str() && RE::SleepWaitMenu::MENU_NAME == event->menuName.c_str();
-
-            if (!isSleepWait || !ShouldBlockSleepWaitMenu()) {
-                return RE::BSEventNotifyControl::kContinue;
-            }
-
-            // Do not inject a UI message while Skyrim is still dispatching the
-            // menu-open event. Queue the hide for the next SKSE task instead.
-            const auto menuName = event->menuName;
-            if (auto* tasks = SKSE::GetTaskInterface()) {
-                tasks->AddTask([menuName]() {
-                    if (auto* queue = RE::UIMessageQueue::GetSingleton()) {
-                        queue->AddMessage(menuName, RE::UI_MESSAGE_TYPE::kHide, nullptr);
-                    }
-                });
-            } else if (auto* queue = RE::UIMessageQueue::GetSingleton()) {
-                queue->AddMessage(menuName, RE::UI_MESSAGE_TYPE::kHide, nullptr);
-            }
-
-            logger::info("Suppressed gameplay Wait menu while preserving the Wait key mapping");
-            return RE::BSEventNotifyControl::kContinue;
-        }
-    };
-
-    void RegisterInputWatcher()
+    void RegisterInputFilter()
     {
         auto* input = RE::BSInputDeviceManager::GetSingleton();
         if (!input) {
@@ -122,20 +68,23 @@ namespace DisableWait
             return;
         }
 
-        input->AddEventSink(InputWatcher::GetSingleton());
-        logger::info("Wait input watcher registered");
-    }
+        auto* filter = InputFilter::GetSingleton();
+        input->AddEventSink(filter);
 
-    void RegisterMenuWatcher()
-    {
-        auto* ui = RE::UI::GetSingleton();
-        if (!ui) {
-            logger::error("UI singleton is unavailable");
-            return;
+        // AddEventSink appends sinks. Skyrim's native PlayerControls/MenuControls
+        // are already registered by kInputLoaded, so move our filter to the front
+        // while preserving the relative order of every other sink. This ensures
+        // the transient Wait event is neutralized before native handlers see it.
+        auto* source = static_cast<RE::BSTEventSource<RE::InputEvent*>*>(input);
+        {
+            RE::BSSpinLockGuard lock(source->lock);
+            auto it = std::find(source->sinks.begin(), source->sinks.end(), filter);
+            if (it != source->sinks.end() && it != source->sinks.begin()) {
+                std::rotate(source->sinks.begin(), it, std::next(it));
+            }
         }
 
-        ui->AddEventSink<RE::MenuOpenCloseEvent>(MenuWatcher::GetSingleton());
-        logger::info("Sleep/Wait menu watcher registered");
+        logger::info("Wait input filter registered at highest input-sink priority");
     }
 
     void MessageHandler(SKSE::MessagingInterface::Message* message)
@@ -144,17 +93,8 @@ namespace DisableWait
             return;
         }
 
-        switch (message->type) {
-        case SKSE::MessagingInterface::kInputLoaded:
-            RegisterInputWatcher();
-            break;
-
-        case SKSE::MessagingInterface::kDataLoaded:
-            RegisterMenuWatcher();
-            break;
-
-        default:
-            break;
+        if (message->type == SKSE::MessagingInterface::kInputLoaded) {
+            RegisterInputFilter();
         }
     }
 }
