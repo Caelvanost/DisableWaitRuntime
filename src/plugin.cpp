@@ -59,10 +59,6 @@ namespace DisableWait
 
                 const auto userEvent = button->QUserEvent();
                 if (userEvent.c_str() && kWaitEvent == userEvent.c_str()) {
-                    // Preserve Skyrim's Wait mapping so UI mods such as RaceMenu
-                    // can still query and reuse the bound key. We only mark the
-                    // next Sleep/Wait menu opening caused by this gameplay input
-                    // for suppression.
                     g_blockSleepWaitUntil = std::chrono::steady_clock::now() + kSuppressionWindow;
                     logger::debug("Native Wait input detected; arming Sleep/Wait menu suppression");
                     break;
@@ -98,7 +94,8 @@ namespace DisableWait
         static void Install()
         {
             REL::Relocation<std::uintptr_t> target{ RE::Offset::UIMessageQueue::AddMessage };
-            func = target.write_branch<5>(thunk);
+            auto& trampoline = SKSE::GetTrampoline();
+            func = trampoline.write_branch<5>(target.address(), thunk);
             logger::info("UIMessageQueue hook installed");
         }
 
