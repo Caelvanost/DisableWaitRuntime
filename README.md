@@ -19,11 +19,11 @@ The plugin does **not** replace `controlmap.txt`, does not require an ESP, and d
 
 ## How it works
 
-Version 0.3.0 changes the implementation from earlier releases.
+Version 0.3.x changes the implementation from earlier releases.
 
 Older versions removed the `Wait` mapping from `RE::ControlMap`. That successfully stopped the Wait menu, but it also removed the mapping used contextually by some UI mods. RaceMenu, for example, uses Skyrim's vanilla `Wait` binding for its **Choose Texture** action.
 
-Version 0.3.0 leaves `RE::ControlMap` untouched.
+Version 0.3.x leaves `RE::ControlMap` untouched.
 
 Instead, Disable Wait Runtime:
 
@@ -101,7 +101,7 @@ package/
         └── DisableWaitRuntime.dll
 
 dist/
-└── Disable-Wait-Runtime-v0.3.0.zip
+└── Disable-Wait-Runtime-v0.3.1.zip
 ```
 
 The ZIP itself contains only the deployable `SKSE/` tree.
@@ -110,7 +110,7 @@ The ZIP itself contains only the deployable `SKSE/` tree.
 
 `VERSION` is the source of truth for the project version.
 
-Current source version: **v0.3.0**
+Current source version: **v0.3.1**
 
 Versioning policy:
 
@@ -118,6 +118,18 @@ Versioning policy:
 - Larger feature or behavior changes increment the second number and reset the third to zero: `0.3.1` → `0.4.0`.
 - `CMakeLists.txt`, the plugin log version, and the deployment ZIP name derive their version from `VERSION`.
 - `README.md` and package metadata must be updated whenever `VERSION` changes.
+
+## Changelog
+
+### 0.3.1
+
+- Fixed the CommonLibSSE-NG 3.5.3 hook build by using the SKSE trampoline API for the branch hook.
+
+### 0.3.0
+
+- Reworked Wait suppression so the vanilla `Wait` mapping is preserved.
+- Added RaceMenu compatibility for actions that query Skyrim's Wait binding, including **Choose Texture**.
+- Suppresses only the gameplay-triggered Sleep/Wait menu request.
 
 ## Project structure
 
@@ -152,7 +164,7 @@ Because it preserves Skyrim's control mapping and suppresses only the native gam
 
 ### RaceMenu
 
-Version 0.3.0 is specifically designed to preserve RaceMenu's **Choose Texture** shortcut. RaceMenu can continue to query the vanilla `Wait` mapping while the native gameplay Wait menu is suppressed.
+Version 0.3.x is specifically designed to preserve RaceMenu's **Choose Texture** shortcut. RaceMenu can continue to query the vanilla `Wait` mapping while the native gameplay Wait menu is suppressed.
 
 ## Uninstallation
 
