@@ -59,8 +59,11 @@ namespace DisableWait
 
                 const auto userEvent = button->QUserEvent();
                 if (userEvent.c_str() && kWaitEvent == userEvent.c_str()) {
+                    // Keep the vanilla Wait mapping intact so UI mods such as
+                    // RaceMenu can still query and reuse it. We only arm a short
+                    // suppression window for the Sleep/Wait menu opened by this
+                    // gameplay input.
                     g_blockSleepWaitUntil = std::chrono::steady_clock::now() + kSuppressionWindow;
-                    logger::debug("Native Wait input detected; arming Sleep/Wait menu suppression");
                     break;
                 }
             }
@@ -69,37 +72,46 @@ namespace DisableWait
         }
     };
 
-    struct UIMessageQueueHook
+    class MenuWatcher final : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
     {
-        static void thunk(
-            RE::UIMessageQueue* queue,
-            const RE::BSFixedString& menuName,
-            RE::UI_MESSAGE_TYPE type,
-            RE::IUIMessageData* data)
+    public:
+        static MenuWatcher* GetSingleton()
         {
-            const bool isSleepWait =
-                menuName.c_str() && RE::SleepWaitMenu::MENU_NAME == menuName.c_str();
-            const bool isOpening =
-                type == RE::UI_MESSAGE_TYPE::kShow ||
-                type == RE::UI_MESSAGE_TYPE::kReshow;
+            static MenuWatcher singleton;
+            return std::addressof(singleton);
+        }
 
-            if (isSleepWait && isOpening && ShouldBlockSleepWaitMenu()) {
-                logger::info("Blocked native Wait menu opening while preserving the Wait key mapping");
-                return;
+        RE::BSEventNotifyControl ProcessEvent(
+            const RE::MenuOpenCloseEvent* event,
+            RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
+        {
+            if (!event || !event->opening) {
+                return RE::BSEventNotifyControl::kContinue;
             }
 
-            func(queue, menuName, type, data);
-        }
+            const bool isSleepWait =
+                event->menuName.c_str() && RE::SleepWaitMenu::MENU_NAME == event->menuName.c_str();
 
-        static void Install()
-        {
-            REL::Relocation<std::uintptr_t> target{ RE::Offset::UIMessageQueue::AddMessage };
-            auto& trampoline = SKSE::GetTrampoline();
-            func = trampoline.write_branch<5>(target.address(), thunk);
-            logger::info("UIMessageQueue hook installed");
-        }
+            if (!isSleepWait || !ShouldBlockSleepWaitMenu()) {
+                return RE::BSEventNotifyControl::kContinue;
+            }
 
-        inline static REL::Relocation<decltype(thunk)> func;
+            // Do not inject a UI message while Skyrim is still dispatching the
+            // menu-open event. Queue the hide for the next SKSE task instead.
+            const auto menuName = event->menuName;
+            if (auto* tasks = SKSE::GetTaskInterface()) {
+                tasks->AddTask([menuName]() {
+                    if (auto* queue = RE::UIMessageQueue::GetSingleton()) {
+                        queue->AddMessage(menuName, RE::UI_MESSAGE_TYPE::kHide, nullptr);
+                    }
+                });
+            } else if (auto* queue = RE::UIMessageQueue::GetSingleton()) {
+                queue->AddMessage(menuName, RE::UI_MESSAGE_TYPE::kHide, nullptr);
+            }
+
+            logger::info("Suppressed gameplay Wait menu while preserving the Wait key mapping");
+            return RE::BSEventNotifyControl::kContinue;
+        }
     };
 
     void RegisterInputWatcher()
@@ -114,14 +126,35 @@ namespace DisableWait
         logger::info("Wait input watcher registered");
     }
 
+    void RegisterMenuWatcher()
+    {
+        auto* ui = RE::UI::GetSingleton();
+        if (!ui) {
+            logger::error("UI singleton is unavailable");
+            return;
+        }
+
+        ui->AddEventSink<RE::MenuOpenCloseEvent>(MenuWatcher::GetSingleton());
+        logger::info("Sleep/Wait menu watcher registered");
+    }
+
     void MessageHandler(SKSE::MessagingInterface::Message* message)
     {
         if (!message) {
             return;
         }
 
-        if (message->type == SKSE::MessagingInterface::kInputLoaded) {
+        switch (message->type) {
+        case SKSE::MessagingInterface::kInputLoaded:
             RegisterInputWatcher();
+            break;
+
+        case SKSE::MessagingInterface::kDataLoaded:
+            RegisterMenuWatcher();
+            break;
+
+        default:
+            break;
         }
     }
 }
@@ -144,9 +177,6 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse)
     }
 
     logger::info("Disable Wait Runtime v{} loading", DISABLE_WAIT_RUNTIME_VERSION);
-
-    SKSE::AllocTrampoline(64);
-    DisableWait::UIMessageQueueHook::Install();
 
     auto* messaging = SKSE::GetMessagingInterface();
     if (!messaging || !messaging->RegisterListener(DisableWait::MessageHandler)) {
